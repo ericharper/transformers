@@ -458,9 +458,10 @@ class FlaxGPT2PreTrainedModel(FlaxPreTrainedModel):
     @add_start_docstrings_to_model_forward(GPT2_INPUTS_DOCSTRING)
     def __call__(
         self,
-        input_ids,
+        input_ids=None,
         attention_mask=None,
         position_ids=None,
+        inputs_embeds=None,
         encoder_hidden_states: Optional[jnp.ndarray] = None,
         encoder_attention_mask: Optional[jnp.ndarray] = None,
         params: dict = None,
@@ -481,7 +482,14 @@ class FlaxGPT2PreTrainedModel(FlaxPreTrainedModel):
             batch_size, sequence_length = encoder_hidden_states.shape[:2]
             encoder_attention_mask = jnp.ones((batch_size, sequence_length))
 
-        batch_size, sequence_length = input_ids.shape
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        elif input_ids is not None:
+            batch_size, sequence_length = input_ids.shape
+        elif inputs_embeds is not None:
+            batch_size, sequence_length = inputs_embeds.shape[:2]
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
 
         if position_ids is None:
             if past_key_values is not None:
@@ -508,9 +516,10 @@ class FlaxGPT2PreTrainedModel(FlaxPreTrainedModel):
 
         outputs = self.module.apply(
             inputs,
-            jnp.array(input_ids, dtype="i4"),
+            None if input_ids is None else jnp.array(input_ids, dtype="i4"),
             jnp.array(attention_mask, dtype="i4"),
             jnp.array(position_ids, dtype="i4"),
+            None if inputs_embeds is None else jnp.array(inputs_embeds, dtype="i4"),
             encoder_hidden_states,
             encoder_attention_mask,
             not train,
@@ -612,6 +621,7 @@ class FlaxGPT2Module(nn.Module):
         input_ids,
         attention_mask,
         position_ids,
+        inputs_embeds=None,
         encoder_hidden_states: Optional[jnp.ndarray] = None,
         encoder_attention_mask: Optional[jnp.ndarray] = None,
         deterministic=True,
@@ -620,10 +630,18 @@ class FlaxGPT2Module(nn.Module):
         output_hidden_states: bool = False,
         return_dict: bool = True,
     ):
-        input_embeds = self.wte(input_ids.astype("i4"))
+        if input_ids is not None and inputs_embeds is not None:
+            raise ValueError("You cannot specify both input_ids and inputs_embeds at the same time")
+        elif input_ids is not None:
+            inputs_embeds = self.wte(input_ids.astype("i4"))
+        elif inputs_embeds is not None:
+            inputs_embeds = inputs_embeds
+        else:
+            raise ValueError("You have to specify either input_ids or inputs_embeds")
+
         position_embeds = self.wpe(position_ids.astype("i4"))
 
-        hidden_states = input_embeds + position_embeds
+        hidden_states = inputs_embeds + position_embeds
         hidden_states = self.dropout(hidden_states, deterministic=deterministic)
 
         outputs = self.h(
